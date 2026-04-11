@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 import ollama
@@ -43,17 +44,8 @@ e restituisci un JSON con ESATTAMENTE questi nomi di campo:
 
 Regole:
 - tipo: "luce", "gas", "acqua" o "telefono" (minuscolo)
-- periodo_inizio e periodo_fine: OBBLIGATORIO, formato YYYY-MM-DD.
-  Sono le date di INIZIO e FINE del periodo di fatturazione effettivo di questa bolletta.
-  Cerca la tabella delle letture contatore (es. "31.12.2025 28.02.2026") o la sezione
-  "Periodo dal ... al ..." riferita ai consumi fatturati.
-  ATTENZIONE: ignora le frasi come "determinato dal X al Y" o "consumo annuo dal X al Y"
-  che indicano il periodo di riferimento annuo dell'offerta, NON il periodo della bolletta.
-  Converti le date italiane: "01 Gennaio 2026" → "2026-01-01",
-  "28 Febbraio 2026" → "2026-02-28", "31 Marzo 2026" → "2026-03-31".
-  Converti le date numeriche: "31.12.2025" → "2025-12-31", "28.02.2026" → "2026-02-28".
-  Mesi: Gennaio=01, Febbraio=02, Marzo=03, Aprile=04, Maggio=05, Giugno=06,
-  Luglio=07, Agosto=08, Settembre=09, Ottobre=10, Novembre=11, Dicembre=12.
+- periodo_inizio e periodo_fine: metti "0000-00-00" come segnaposto, saranno
+  calcolate automaticamente dal sistema — non devi calcolarle tu.
 - importo_totale: il "Totale da pagare" in euro, numero decimale (es. 194.00)
 - consumo: consumo numerico fatturato, oppure null se non presente
 - unita_consumo: unità di misura (es. "kWh", "Smc", "m³"), oppure null
@@ -63,6 +55,75 @@ Regole:
 Testo bolletta:
 {markdown}
 """
+
+_MESI_IT = {
+    "gennaio": "01", "febbraio": "02", "marzo": "03", "aprile": "04",
+    "maggio": "05", "giugno": "06", "luglio": "07", "agosto": "08",
+    "settembre": "09", "ottobre": "10", "novembre": "11", "dicembre": "12",
+}
+
+
+def _it_date(day: str, month: str, year: str) -> str | None:
+    """Convert Italian word date components to YYYY-MM-DD, or None if unknown month."""
+    m = _MESI_IT.get(month.strip().lower())
+    return f"{year}-{m}-{day.zfill(2)}" if m else None
+
+
+def _num_date(s: str) -> str:
+    """Convert dd.mm.yyyy to YYYY-MM-DD."""
+    d, m, y = s.split(".")
+    return f"{y}-{m}-{d}"
+
+
+def _extract_tipo(markdown: str) -> str | None:
+    """Detect bill type from keywords in the markdown."""
+    head = markdown[:3000].lower()
+    if any(k in head for k in ("energia elettrica", "luce", "elettric", "kwh")):
+        return "luce"
+    if any(k in head for k in ("gas naturale", "gas", "smc", "metano")):
+        return "gas"
+    if any(k in head for k in ("acqua", "idric")):
+        return "acqua"
+    return None
+
+
+def _extract_period_dates(markdown: str) -> dict | None:
+    """Extract periodo_inizio / periodo_fine directly from markdown using regex.
+
+    Two formats handled:
+    1. Old A2A (picture-text): "bolletta per i consumi<br>dal DD Mese YYYY<br>al DD Mese YYYY"
+       Dates are exact — no adjustment needed.
+    2. New A2A (readings table): rows of "dd.mm.yyyy dd.mm.yyyy ..." after "Periodo dal".
+       The first row's start date is the final meter reading of the PREVIOUS period,
+       so we add 1 day to get the actual billing start.
+    """
+    # Method 1: old format — "QUANTO DEVO PAGARE" picture-text block
+    m = re.search(
+        r"bolletta per i consumi<br>\s*"
+        r"dal\s+(\d{1,2})\s+(\w+)\s+(\d{4})<br>\s*"
+        r"al\s+(\d{1,2})\s+(\w+)\s+(\d{4})",
+        markdown,
+        re.IGNORECASE,
+    )
+    if m:
+        inizio = _it_date(m.group(1), m.group(2), m.group(3))
+        fine = _it_date(m.group(4), m.group(5), m.group(6))
+        if inizio and fine:
+            return {"periodo_inizio": inizio, "periodo_fine": fine}
+
+    # Method 2: new format — meter readings table.
+    # Search within the readings table section if the header is present; otherwise
+    # fall back to scanning the full document (some bill renderings omit the header).
+    table = re.search(r"Periodo dal", markdown, re.IGNORECASE)
+    area = markdown[table.start(): table.start() + 2000] if table else markdown
+    rows = re.findall(r"(\d{2}\.\d{2}\.\d{4})(?:\s+|<br>|\|)(\d{2}\.\d{2}\.\d{4})", area)
+    if rows:
+        first_start = date.fromisoformat(_num_date(rows[0][0]))
+        last_end = _num_date(rows[-1][1])
+        inizio = (first_start + timedelta(days=1)).isoformat()
+        return {"periodo_inizio": inizio, "periodo_fine": last_end}
+
+    return None
 
 
 def _parse_json(text: str) -> dict:
@@ -93,33 +154,27 @@ def extract_bill_data(markdown: str) -> dict:
     missing = required - data.keys()
     if missing:
         raise ValueError(f"Campi mancanti nell'estrazione LLM: {missing}")
-    null_required = {k for k in required if data.get(k) is None}
-    if null_required:
-        raise ValueError(
-            f"Campi obbligatori nulli nell'estrazione LLM: {null_required}. "
-            f"Dati estratti: {data}"
-        )
     return data
 
 
-def _relevant_text(markdown: str, head: int = 3500, window: int = 1000) -> str:
-    """Return the first `head` chars plus the window around the readings table.
+def _strip_consumo_annuo(text: str) -> str:
+    """Remove the CONSUMO ANNUO block so the LLM cannot mistake it for the billing period."""
+    return re.sub(
+        r"CONSUMO ANNUO[\s\S]{0,400}?\bal \d{1,2} \w+ \d{4}",
+        "[CONSUMO ANNUO: omesso]",
+        text,
+    )
 
-    3500 chars captures tipo, fornitore, and importo_totale for typical Italian
-    bills (these appear within the first 2-3 pages / ~3000 chars).
-    The readings table (meter dates = real billing period) typically sits beyond
-    that, so we locate it with a regex and append a focused window around it.
+
+def _relevant_text(markdown: str, head: int = 3500, window: int = 1000) -> str:
+    """Return a focused excerpt of the markdown for LLM extraction.
+
+    The dates are no longer extracted by the LLM (handled by _extract_period_dates),
+    so this function only needs to capture tipo, fornitore, importo_totale, consumo,
+    and scadenza_pagamento — all of which appear in the first ~3500 chars.
     """
-    header = markdown[:head]
-    # Look for a line with two dates close together (dd.mm.yyyy dd.mm.yyyy)
-    # which is the signature of the meter readings table in Italian bills.
-    match = re.search(r"\d{2}\.\d{2}\.\d{4}\s+\d{2}\.\d{2}\.\d{4}", markdown[head:])
-    if match:
-        start = head + max(0, match.start() - 100)
-        snippet = markdown[start: start + window]
-        return header + "\n\n[...]\n\n" + snippet
-    # Fallback: extend the head without readings table
-    return markdown[:head + window]
+    header = _strip_consumo_annuo(markdown[:head])
+    return header + markdown[head: head + window]
 
 
 def ingest_pdf(
@@ -134,6 +189,26 @@ def ingest_pdf(
     md_path.write_text(markdown, encoding="utf-8")
 
     data = extract_bill_data(_relevant_text(markdown))
+
+    # Override LLM date placeholders with regex-extracted dates (deterministic).
+    period = _extract_period_dates(markdown)
+    if period:
+        data.update(period)
+    elif data.get("periodo_inizio") == "0000-00-00":
+        raise ValueError("Impossibile estrarre le date del periodo dalla bolletta.")
+
+    # Override tipo if LLM returned null (keyword detection is more reliable).
+    if not data.get("tipo"):
+        data["tipo"] = _extract_tipo(markdown)
+
+    required = {"tipo", "fornitore", "periodo_inizio", "periodo_fine", "importo_totale"}
+    null_required = {k for k in required if not data.get(k) or data[k] == "0000-00-00"}
+    if null_required:
+        raise ValueError(
+            f"Campi obbligatori mancanti dopo l'estrazione: {null_required}. "
+            f"Dati: {data}"
+        )
+
     data["file_pdf"] = str(pdf_path.resolve())
     data["file_md"] = str(md_path.resolve())
 
