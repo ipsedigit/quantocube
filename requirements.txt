@@ -1,0 +1,6 @@
+streamlit>=1.32.0
+ollama>=0.1.8
+pymupdf4llm>=0.0.17
+plotly>=5.20.0
+pandas>=2.0.0
+pytest>=8.0.0

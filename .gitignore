@@ -1,0 +1,16 @@
+/.claude/settings.local.*
+/.superpowers/*
+/.superpowers/brainstorm/937-1775927214/content/per-type-layout.html
+/.superpowers/brainstorm/937-1775927214/content/tab-content.html
+/.superpowers/brainstorm/937-1775927214/content/waiting-1.html
+/.superpowers/brainstorm/937-1775927214/content/waiting-2.html
+/.superpowers/brainstorm/937-1775927214/state/server.pid
+/.superpowers/brainstorm/937-1775927214/state/server-stopped
+/__pycache__/*
+/bills/*
+/data/*
+/docs/*
+/fix_duplicates.py
+/preview/dashboard.html
+/sample/526503368357_2026_s.pdf
+/superpowers/*
