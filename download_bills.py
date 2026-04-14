@@ -66,6 +66,12 @@ def _find_all_mail(imap: imaplib.IMAP4_SSL) -> str:
 
 
 def main() -> None:
+    """Download all PDF bill attachments from Gmail to bills/pdfs/.
+
+    Reads GMAIL_USER and GMAIL_APP_PASSWORD from .env (or environment).
+    Connects to Gmail via IMAP SSL, searches for emails from noreply@a2aenergia.it,
+    and saves each PDF attachment to bills/pdfs/. Skips files already present.
+    """
     env = load_env()
     user = env.get("GMAIL_USER") or os.environ.get("GMAIL_USER", "")
     password = env.get("GMAIL_APP_PASSWORD") or os.environ.get("GMAIL_APP_PASSWORD", "")
@@ -74,33 +80,38 @@ def main() -> None:
         return
 
     print(f"Connecting to {IMAP_HOST}...")
-    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) as imap:
-        imap.login(user, password)
+    try:
+        with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) as imap:
+            imap.login(user, password)
 
-        folder = _find_all_mail(imap)
-        imap.select(folder, readonly=True)
+            folder = _find_all_mail(imap)
+            imap.select(folder, readonly=True)
 
-        _, msg_ids_raw = imap.search(None, f'FROM "{SENDER}"')
-        ids = msg_ids_raw[0].split()
-        print(f"Found {len(ids)} emails from {SENDER}")
+            _, msg_ids_raw = imap.search(None, f'FROM "{SENDER}"')
+            ids = [i for i in msg_ids_raw[0].split() if i]
+            print(f"Found {len(ids)} emails from {SENDER}")
 
-        saved = skipped = 0
-        for msg_id in ids:
-            _, msg_data = imap.fetch(msg_id, "(RFC822)")
-            if not msg_data or not msg_data[0]:
-                continue
-            msg = email_lib.message_from_bytes(msg_data[0][1])
-            for filename, data in parse_pdf_attachments(msg):
-                status = save_pdf(filename, data, DEST_DIR)
-                if status == "saved":
-                    saved += 1
-                    print(f"  Saved: {filename}")
-                else:
-                    skipped += 1
+            saved = skipped = 0
+            for msg_id in ids:
+                _, msg_data = imap.fetch(msg_id, "(RFC822)")
+                if not msg_data or not msg_data[0]:
+                    continue
+                msg = email_lib.message_from_bytes(msg_data[0][1])
+                for filename, data in parse_pdf_attachments(msg):
+                    status = save_pdf(filename, data, DEST_DIR)
+                    if status == "saved":
+                        saved += 1
+                        print(f"  Saved: {filename}")
+                    else:
+                        skipped += 1
 
-    print(f"\nSaved {saved} PDFs to {DEST_DIR}/")
-    if skipped:
-        print(f"Skipped {skipped} (already present)")
+        print(f"\nSaved {saved} PDFs to {DEST_DIR}/")
+        if skipped:
+            print(f"Skipped {skipped} (already present)")
+    except imaplib.IMAP4.error as e:
+        print(f"Error: IMAP error — {e}")
+    except OSError as e:
+        print(f"Error: connection failed — {e}")
 
 
 if __name__ == "__main__":
