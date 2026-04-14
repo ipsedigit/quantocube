@@ -51,3 +51,57 @@ def save_pdf(filename: str, data: bytes, dest_dir: Path) -> str:
         return "skipped"
     path.write_bytes(data)
     return "saved"
+
+
+def _find_all_mail(imap: imaplib.IMAP4_SSL) -> str:
+    """Return the name of the All Mail folder (language-independent)."""
+    _, mailboxes = imap.list()
+    for mb in mailboxes:
+        if mb and b"\\All" in mb:
+            # Format: b'(\\All \\HasNoChildren) "/" "[Gmail]/All Mail"'
+            parts = mb.decode().split('"')
+            if len(parts) >= 2:
+                return parts[-2]
+    return "[Gmail]/All Mail"  # safe default
+
+
+def main() -> None:
+    env = load_env()
+    user = env.get("GMAIL_USER") or os.environ.get("GMAIL_USER", "")
+    password = env.get("GMAIL_APP_PASSWORD") or os.environ.get("GMAIL_APP_PASSWORD", "")
+    if not user or not password:
+        print("Error: set GMAIL_USER and GMAIL_APP_PASSWORD in .env")
+        return
+
+    print(f"Connecting to {IMAP_HOST}...")
+    with imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT) as imap:
+        imap.login(user, password)
+
+        folder = _find_all_mail(imap)
+        imap.select(folder, readonly=True)
+
+        _, msg_ids_raw = imap.search(None, f'FROM "{SENDER}"')
+        ids = msg_ids_raw[0].split()
+        print(f"Found {len(ids)} emails from {SENDER}")
+
+        saved = skipped = 0
+        for msg_id in ids:
+            _, msg_data = imap.fetch(msg_id, "(RFC822)")
+            if not msg_data or not msg_data[0]:
+                continue
+            msg = email_lib.message_from_bytes(msg_data[0][1])
+            for filename, data in parse_pdf_attachments(msg):
+                status = save_pdf(filename, data, DEST_DIR)
+                if status == "saved":
+                    saved += 1
+                    print(f"  Saved: {filename}")
+                else:
+                    skipped += 1
+
+    print(f"\nSaved {saved} PDFs to {DEST_DIR}/")
+    if skipped:
+        print(f"Skipped {skipped} (already present)")
+
+
+if __name__ == "__main__":
+    main()
