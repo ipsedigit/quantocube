@@ -22,6 +22,8 @@ SYSTEM_PROMPT = {
 
 def init() -> None:
     db.init_db()
+    db.cleanup_duplicates()
+    ingester.repair_importo()
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "ingested_files" not in st.session_state:

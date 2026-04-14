@@ -1,5 +1,18 @@
+import re
 import sqlite3
 from pathlib import Path
+
+_LEGAL_RE = re.compile(
+    r"\s*\b(s\.?p\.?a\.?|s\.?r\.?l\.?|s\.?n\.?c\.?|s\.?a\.?s\.?|s\.?c\.?a\.?r\.?l\.?)\b\s*",
+    re.IGNORECASE,
+)
+
+
+def _normalize_fornitore(name: str) -> str:
+    """Lowercase, strip legal suffixes (s.p.a., s.r.l., …), collapse whitespace."""
+    name = _LEGAL_RE.sub(" ", name)
+    name = " ".join(name.lower().split())
+    return name.strip(" .")
 
 DB_PATH = Path(__file__).parent / "data" / "bills.db"
 
@@ -32,11 +45,14 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
 
 def insert_bill(data: dict, db_path: Path = DB_PATH) -> int:
+    data = dict(data)
+    data["fornitore"] = _normalize_fornitore(data["fornitore"])
+
     with get_connection(db_path) as conn:
         existing = conn.execute(
             """
             SELECT id FROM bollette
-            WHERE tipo = ? AND LOWER(fornitore) = LOWER(?)
+            WHERE tipo = ? AND fornitore = ?
               AND periodo_inizio = ? AND periodo_fine = ?
             """,
             [data["tipo"], data["fornitore"], data["periodo_inizio"], data["periodo_fine"]],
@@ -61,6 +77,81 @@ def insert_bill(data: dict, db_path: Path = DB_PATH) -> int:
         return cursor.lastrowid
 
 
+def update_consumption(
+    bill_id: int,
+    consumo: float,
+    unita_consumo: str,
+    db_path: Path = DB_PATH,
+) -> None:
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "UPDATE bollette SET consumo = ?, unita_consumo = ? WHERE id = ?",
+            [consumo, unita_consumo, bill_id],
+        )
+
+
 def delete_bill(bill_id: int, db_path: Path = DB_PATH) -> None:
     with get_connection(db_path) as conn:
         conn.execute("DELETE FROM bollette WHERE id = ?", [bill_id])
+
+
+def cleanup_duplicates(db_path: Path = DB_PATH) -> int:
+    """Normalize all fornitore values and delete duplicate bills.
+
+    Two bills are duplicates when tipo + fornitore (normalized) + periodo coincide.
+    Among duplicates, the row with consumo NOT NULL is kept; otherwise the lowest id.
+    Returns the number of deleted rows.
+    """
+    with get_connection(db_path) as conn:
+        # Normalize existing fornitori.
+        rows = conn.execute("SELECT id, fornitore FROM bollette").fetchall()
+        for row in rows:
+            normalized = _normalize_fornitore(row["fornitore"])
+            if normalized != row["fornitore"]:
+                conn.execute(
+                    "UPDATE bollette SET fornitore = ? WHERE id = ?",
+                    [normalized, row["id"]],
+                )
+
+        # Find groups with more than one row after normalization.
+        groups = conn.execute("""
+            SELECT tipo, fornitore, periodo_inizio, periodo_fine
+            FROM bollette
+            GROUP BY tipo, fornitore, periodo_inizio, periodo_fine
+            HAVING COUNT(*) > 1
+        """).fetchall()
+
+        deleted = 0
+        for g in groups:
+            members = conn.execute("""
+                SELECT id FROM bollette
+                WHERE tipo = ? AND fornitore = ?
+                  AND periodo_inizio = ? AND periodo_fine = ?
+                ORDER BY (consumo IS NOT NULL) DESC, id ASC
+            """, [g["tipo"], g["fornitore"], g["periodo_inizio"], g["periodo_fine"]]).fetchall()
+
+            for row in members[1:]:
+                conn.execute("DELETE FROM bollette WHERE id = ?", [row["id"]])
+                deleted += 1
+
+        # Second pass: deduplicate by file_pdf — same PDF can never be two distinct bills.
+        pdf_groups = conn.execute("""
+            SELECT file_pdf, COUNT(*) as cnt
+            FROM bollette
+            WHERE file_pdf IS NOT NULL
+            GROUP BY file_pdf
+            HAVING cnt > 1
+        """).fetchall()
+
+        for g in pdf_groups:
+            members = conn.execute("""
+                SELECT id FROM bollette
+                WHERE file_pdf = ?
+                ORDER BY (consumo IS NOT NULL) DESC, id ASC
+            """, [g["file_pdf"]]).fetchall()
+
+            for row in members[1:]:
+                conn.execute("DELETE FROM bollette WHERE id = ?", [row["id"]])
+                deleted += 1
+
+    return deleted

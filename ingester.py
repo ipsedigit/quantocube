@@ -3,6 +3,7 @@ import re
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
+import fitz
 import ollama
 import pymupdf4llm
 import db
@@ -138,6 +139,38 @@ def _parse_json(text: str) -> dict:
         raise ValueError(f"LLM returned invalid JSON: {text!r}") from exc
 
 
+def _extract_importo_da_pdf(pdf_path: Path) -> float | None:
+    """Extract importo_totale from PDF page 1 using coordinate-based text extraction.
+
+    A2A bills render 'QUANTO DEVO PAGARE' and the amount in a graphical box that
+    pymupdf4llm skips entirely.  PyMuPDF's get_text('dict') can still read it.
+    """
+    try:
+        doc = fitz.open(str(pdf_path))
+        spans = []
+        for block in doc[0].get_text("dict")["blocks"]:
+            if block["type"] == 0:
+                for line in block["lines"]:
+                    for span in line["spans"]:
+                        text = span["text"].strip()
+                        if text:
+                            spans.append((span["bbox"][1], text))
+
+        header_y = next(
+            (y for y, t in spans if "QUANTO DEVO PAGARE" in t.upper()), None
+        )
+        if header_y is None:
+            return None
+
+        for y, text in sorted(spans):
+            if header_y < y < header_y + 200:
+                if re.fullmatch(r"\d{1,3}(?:\.\d{3})*,\d{2}", text):
+                    return float(text.replace(".", "").replace(",", "."))
+    except Exception:
+        pass
+    return None
+
+
 def pdf_to_markdown(pdf_path: Path) -> str:
     return pymupdf4llm.to_markdown(str(pdf_path))
 
@@ -159,11 +192,70 @@ def extract_bill_data(markdown: str) -> dict:
 
 def _strip_consumo_annuo(text: str) -> str:
     """Remove the CONSUMO ANNUO block so the LLM cannot mistake it for the billing period."""
-    return re.sub(
+    # New format: "CONSUMO ANNUO ... al DD Mese YYYY"
+    text = re.sub(
         r"CONSUMO ANNUO[\s\S]{0,400}?\bal \d{1,2} \w+ \d{4}",
         "[CONSUMO ANNUO: omesso]",
         text,
     )
+    # Old format: "**Consumo annuo** ... DD.MM.YYYY"
+    text = re.sub(
+        r"\*\*[Cc]onsumo\s+[Aa]nnuo\*\*[\s\S]{0,600}?\d{2}\.\d{2}\.\d{4}",
+        "[CONSUMO ANNUO: omesso]",
+        text,
+    )
+    return text
+
+
+def _extract_consumption(markdown: str, tipo: str) -> tuple[float | None, str | None]:
+    """Deterministic regex fallback for consumption extraction.
+
+    Used when the LLM returns null for consumo.  Returns (value, unit) or (None, None).
+    """
+    if tipo == "luce":
+        return _extract_consumption_luce(markdown)
+    if tipo == "gas":
+        return _extract_consumption_gas(markdown)
+    return None, None
+
+
+def _extract_consumption_luce(markdown: str) -> tuple[float | None, str | None]:
+    """Extract kWh from luce bills.
+
+    Two formats:
+    - New A2A: bold line item "**360 kWh** **0,189944 €/kWh** ..."
+    - Old A2A: meter table rows "|...|61 kWh|Effettivo|"
+    """
+    # Method 1 – new format: first bold kWh after stripping annual consumption block.
+    stripped = _strip_consumo_annuo(markdown[:4500])
+    m = re.search(r"\*\*(\d[\d.]*)\s*kWh\*\*", stripped)
+    if m:
+        # Italian uses "." as thousands separator (e.g. "2.039") — remove it.
+        return float(m.group(1).replace(".", "")), "kWh"
+
+    # Method 2 – old format: sum all per-fascia rows from the meter table.
+    vals = [int(v) for v in re.findall(r"\|(\d+)\s*kWh\|Effettivo\|", markdown)]
+    if vals:
+        return float(sum(vals)), "kWh"
+
+    return None, None
+
+
+def _extract_consumption_gas(markdown: str) -> tuple[float | None, str | None]:
+    """Extract Smc from gas bills by summing meter-table rows.
+
+    Row format: |DD.MM.YYYY|DD.MM.YYYY|meter_start|type|meter_end|type|consumption|Effettivo|...|
+    """
+    vals = [
+        int(v)
+        for v in re.findall(
+            r"\|\d{2}\.\d{2}\.\d{4}\|\d{2}\.\d{2}\.\d{4}\|[\d.]+\|[^|]+\|[\d.]+\|[^|]+\|(\d+)\|Effettivo\|",
+            markdown,
+        )
+    ]
+    if vals:
+        return float(sum(vals)), "Smc"
+    return None, None
 
 
 def _relevant_text(markdown: str, head: int = 3500, window: int = 1000) -> str:
@@ -175,6 +267,75 @@ def _relevant_text(markdown: str, head: int = 3500, window: int = 1000) -> str:
     """
     header = _strip_consumo_annuo(markdown[:head])
     return header + markdown[head: head + window]
+
+
+def repair_importo(db_path: Path = db.DB_PATH) -> list[dict]:
+    """Re-extract importo_totale for all bills using coordinate-based PDF extraction.
+
+    Updates the DB when a reliable value is found and it differs from what is stored.
+    Returns a list of repair results.
+    """
+    with db.get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, importo_totale, file_pdf FROM bollette WHERE file_pdf IS NOT NULL"
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        bill_id, stored = row["id"], row["importo_totale"]
+        pdf_path = Path(row["file_pdf"])
+        if not pdf_path.exists():
+            results.append({"id": bill_id, "status": "pdf_missing"})
+            continue
+
+        importo = _extract_importo_da_pdf(pdf_path)
+        if importo is None:
+            results.append({"id": bill_id, "status": "not_found"})
+            continue
+
+        if importo == stored:
+            results.append({"id": bill_id, "status": "ok", "importo": importo})
+            continue
+
+        with db.get_connection(db_path) as conn:
+            conn.execute(
+                "UPDATE bollette SET importo_totale = ? WHERE id = ?",
+                [importo, bill_id],
+            )
+        results.append({"id": bill_id, "status": "updated", "old": stored, "new": importo})
+
+    return results
+
+
+def repair_null_consumption(db_path: Path = db.DB_PATH) -> list[dict]:
+    """Re-extract consumption for all bills that have consumo = NULL.
+
+    Reads the stored markdown file, applies deterministic regex extraction,
+    and updates the DB if a value is found.  Returns a list of repair results.
+    """
+    with db.get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, tipo, file_md FROM bollette WHERE consumo IS NULL AND file_md IS NOT NULL"
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        bill_id, tipo, file_md = row["id"], row["tipo"], row["file_md"]
+        md_path = Path(file_md)
+        if not md_path.exists():
+            results.append({"id": bill_id, "tipo": tipo, "status": "md_missing"})
+            continue
+
+        markdown = md_path.read_text(encoding="utf-8")
+        val, unit = _extract_consumption(markdown, tipo)
+        if val is None:
+            results.append({"id": bill_id, "tipo": tipo, "status": "not_found"})
+            continue
+
+        db.update_consumption(bill_id, val, unit, db_path)
+        results.append({"id": bill_id, "tipo": tipo, "consumo": val, "unita_consumo": unit, "status": "updated"})
+
+    return results
 
 
 def ingest_pdf(
@@ -200,6 +361,19 @@ def ingest_pdf(
     # Override tipo if LLM returned null (keyword detection is more reliable).
     if not data.get("tipo"):
         data["tipo"] = _extract_tipo(markdown)
+
+    # Override importo_totale with coordinate-based extraction (more reliable than LLM
+    # for bills where the total lives in a graphical box not captured by pymupdf4llm).
+    importo = _extract_importo_da_pdf(pdf_path)
+    if importo is not None:
+        data["importo_totale"] = importo
+
+    # Override null consumo with deterministic regex extraction.
+    if data.get("consumo") is None and data.get("tipo"):
+        val, unit = _extract_consumption(markdown, data["tipo"])
+        if val is not None:
+            data["consumo"] = val
+            data["unita_consumo"] = unit
 
     required = {"tipo", "fornitore", "periodo_inizio", "periodo_fine", "importo_totale"}
     null_required = {k for k in required if not data.get(k) or data[k] == "0000-00-00"}
