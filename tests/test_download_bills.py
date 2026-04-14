@@ -75,3 +75,22 @@ def test_parse_pdf_attachments_multiple():
     filenames = [r[0] for r in result]
     assert "jan.pdf" in filenames
     assert "feb.pdf" in filenames
+
+
+def test_save_pdf_writes_file(tmp_path):
+    status = download_bills.save_pdf("bill.pdf", b"%PDF data", tmp_path)
+    assert status == "saved"
+    assert (tmp_path / "bill.pdf").read_bytes() == b"%PDF data"
+
+
+def test_save_pdf_skips_existing(tmp_path):
+    (tmp_path / "bill.pdf").write_bytes(b"original")
+    status = download_bills.save_pdf("bill.pdf", b"new data", tmp_path)
+    assert status == "skipped"
+    assert (tmp_path / "bill.pdf").read_bytes() == b"original"
+
+
+def test_save_pdf_creates_dest_dir(tmp_path):
+    dest = tmp_path / "nested" / "pdfs"
+    download_bills.save_pdf("bill.pdf", b"%PDF", dest)
+    assert (dest / "bill.pdf").exists()

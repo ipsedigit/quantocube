@@ -41,3 +41,13 @@ def parse_pdf_attachments(msg: Message) -> list[tuple[str, bytes]]:
             if data:
                 result.append((filename, data))
     return result
+
+
+def save_pdf(filename: str, data: bytes, dest_dir: Path) -> str:
+    """Save PDF bytes to dest_dir/filename. Returns 'saved' or 'skipped'."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    path = dest_dir / filename
+    if path.exists():
+        return "skipped"
+    path.write_bytes(data)
+    return "saved"
