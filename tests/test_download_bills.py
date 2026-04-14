@@ -20,3 +20,58 @@ def test_load_env_ignores_comments_and_blanks(tmp_path):
 def test_load_env_missing_file_returns_empty():
     result = download_bills.load_env("/nonexistent/.env")
     assert result == {}
+
+
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
+from email.message import Message
+
+
+def _make_email(attachments: list[tuple[str, bytes]]) -> Message:
+    """Build a synthetic email.message.Message with the given PDF attachments."""
+    msg = MIMEMultipart()
+    msg["From"] = "sender@example.com"
+    msg["To"] = "me@example.com"
+    msg["Subject"] = "Bolletta"
+    msg.attach(MIMEText("body text"))
+    for filename, data in attachments:
+        part = MIMEBase("application", "pdf")
+        part.set_payload(data)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(part)
+    return msg
+
+
+def test_parse_pdf_attachments_returns_pdf_data():
+    msg = _make_email([("bolletta.pdf", b"%PDF-1.4 fake")])
+    result = download_bills.parse_pdf_attachments(msg)
+    assert len(result) == 1
+    assert result[0][0] == "bolletta.pdf"
+    assert result[0][1] == b"%PDF-1.4 fake"
+
+
+def test_parse_pdf_attachments_ignores_non_pdf():
+    msg = _make_email([])
+    # add a non-PDF attachment manually
+    part = MIMEBase("application", "octet-stream")
+    part.set_payload(b"data")
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", "attachment", filename="readme.txt")
+    msg.attach(part)
+    result = download_bills.parse_pdf_attachments(msg)
+    assert result == []
+
+
+def test_parse_pdf_attachments_multiple():
+    msg = _make_email([
+        ("jan.pdf", b"%PDF jan"),
+        ("feb.pdf", b"%PDF feb"),
+    ])
+    result = download_bills.parse_pdf_attachments(msg)
+    assert len(result) == 2
+    filenames = [r[0] for r in result]
+    assert "jan.pdf" in filenames
+    assert "feb.pdf" in filenames

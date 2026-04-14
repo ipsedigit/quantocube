@@ -27,3 +27,17 @@ def load_env(path: str = ".env") -> dict[str, str]:
     except FileNotFoundError:
         pass
     return env
+
+
+def parse_pdf_attachments(msg: Message) -> list[tuple[str, bytes]]:
+    """Return [(filename, bytes)] for every PDF attachment in the message."""
+    result = []
+    for part in msg.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        filename = part.get_filename()
+        if filename and filename.lower().endswith(".pdf"):
+            data = part.get_payload(decode=True)
+            if data:
+                result.append((filename, data))
+    return result
