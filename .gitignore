@@ -1,4 +1,6 @@
 /.claude/settings.local.*
+/.env
+.env
 /.superpowers/*
 /.superpowers/brainstorm/937-1775927214/content/per-type-layout.html
 /.superpowers/brainstorm/937-1775927214/content/tab-content.html
