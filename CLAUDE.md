@@ -12,6 +12,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 streamlit run app.py
 ```
 
+## Downloading Bills from Gmail (one-shot)
+
+```bash
+python download_bills.py
+```
+
+Requires a `.env` file in the project root:
+
+```
+GMAIL_USER=tuo@gmail.com
+GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
+```
+
+The App Password is generated from Google Account → Security → 2-Step Verification → App passwords.
+Gmail IMAP must be enabled (Gmail Settings → Forwarding and POP/IMAP).
+
+The script searches all Gmail for emails with subject containing "Notifica emissione bolletta",
+downloads all PDF attachments to `bills/pdfs/`, and skips files already present.
+After running, upload the PDFs manually via the Quanto UI.
+
 Requires Ollama running locally with `qwen2.5:7b` pulled (`llama3.2:3b` as fallback).
 
 ## Tech Stack

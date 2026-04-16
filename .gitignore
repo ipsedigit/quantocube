@@ -16,3 +16,5 @@
 /preview/dashboard.html
 /sample/526503368357_2026_s.pdf
 /superpowers/*
+/.idea/*
+/tests/__pycache__/*

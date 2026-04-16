@@ -85,9 +85,9 @@ def main() -> None:
             imap.login(user, password)
 
             folder = _find_all_mail(imap)
-            imap.select(folder, readonly=True)
+            imap.select(f'"{folder}"', readonly=True)
 
-            _, msg_ids_raw = imap.search(None, f'FROM "{SENDER}"')
+            _, msg_ids_raw = imap.search(None, 'SUBJECT "Notifica emissione bolletta"')
             ids = [i for i in msg_ids_raw[0].split() if i]
             print(f"Found {len(ids)} emails from {SENDER}")
 
