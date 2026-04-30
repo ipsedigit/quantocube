@@ -23,6 +23,26 @@ SAMPLE_BILL = {
     "file_md": "/bills/md/enel.md",
 }
 
+SAMPLE_BILL_TELEFONO = {
+    "tipo": "telefono",
+    "fornitore": "TIM",
+    "periodo_inizio": "2026-03-01",
+    "periodo_fine": "2026-03-31",
+    "importo_totale": 43.89,
+    "consumo": None,
+    "unita_consumo": None,
+    "tariffa": None,
+    "scadenza_pagamento": "2026-05-08",
+    "file_pdf": None,
+    "file_md": None,
+}
+
+SAMPLE_VOCI = [
+    {"nome": "TIM CONNECT Premium XDSL", "importo": 33.90, "periodo_inizio": "2026-03-01", "periodo_fine": "2026-03-31"},
+    {"nome": "Massima Velocità", "importo": 5.00, "periodo_inizio": "2026-03-01", "periodo_fine": "2026-03-31"},
+    {"nome": "TIMVISION Light", "importo": 4.99, "periodo_inizio": "2026-03-01", "periodo_fine": "2026-03-31"},
+]
+
 
 def test_init_db_creates_table(tmp_db):
     with db.get_connection(tmp_db) as conn:
@@ -119,3 +139,31 @@ def test_bollette_voci_cascade_delete(tmp_db):
     with db.get_connection(tmp_db) as conn:
         count = conn.execute("SELECT COUNT(*) FROM bollette_voci").fetchone()[0]
     assert count == 0
+
+
+def test_insert_voci_stores_all_rows(tmp_db):
+    bill_id = db.insert_bill(SAMPLE_BILL_TELEFONO, tmp_db)
+    db.insert_voci(bill_id, SAMPLE_VOCI, tmp_db)
+    voci = db.get_voci_by_bolletta(bill_id, tmp_db)
+    assert len(voci) == 3
+
+
+def test_insert_voci_correct_values(tmp_db):
+    bill_id = db.insert_bill(SAMPLE_BILL_TELEFONO, tmp_db)
+    db.insert_voci(bill_id, SAMPLE_VOCI, tmp_db)
+    voci = db.get_voci_by_bolletta(bill_id, tmp_db)
+    assert voci[0]["nome"] == "TIM CONNECT Premium XDSL"
+    assert voci[0]["importo"] == pytest.approx(33.90)
+    assert voci[0]["periodo_inizio"] == "2026-03-01"
+    assert voci[0]["periodo_fine"] == "2026-03-31"
+
+
+def test_get_voci_by_bolletta_unknown_id(tmp_db):
+    assert db.get_voci_by_bolletta(999, tmp_db) == []
+
+
+def test_voci_cascade_delete(tmp_db):
+    bill_id = db.insert_bill(SAMPLE_BILL_TELEFONO, tmp_db)
+    db.insert_voci(bill_id, SAMPLE_VOCI, tmp_db)
+    db.delete_bill(bill_id, tmp_db)
+    assert db.get_voci_by_bolletta(bill_id, tmp_db) == []

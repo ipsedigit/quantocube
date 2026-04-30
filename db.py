@@ -106,6 +106,27 @@ def update_consumption(
         )
 
 
+def insert_voci(bolletta_id: int, voci: list[dict], db_path: Path = DB_PATH) -> None:
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO bollette_voci (bolletta_id, nome, importo, periodo_inizio, periodo_fine)
+            VALUES (:bolletta_id, :nome, :importo, :periodo_inizio, :periodo_fine)
+            """,
+            [{"bolletta_id": bolletta_id, **v} for v in voci],
+        )
+
+
+def get_voci_by_bolletta(bolletta_id: int, db_path: Path = DB_PATH) -> list[dict]:
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT nome, importo, periodo_inizio, periodo_fine "
+            "FROM bollette_voci WHERE bolletta_id = ? ORDER BY id",
+            [bolletta_id],
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def delete_bill(bill_id: int, db_path: Path = DB_PATH) -> None:
     with get_connection(db_path) as conn:
         conn.execute("DELETE FROM bollette WHERE id = ?", [bill_id])
