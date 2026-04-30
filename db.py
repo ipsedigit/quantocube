@@ -107,6 +107,7 @@ def update_consumption(
 
 
 def insert_voci(bolletta_id: int, voci: list[dict], db_path: Path = DB_PATH) -> None:
+    """Bulk-insert service line items for a bill into bollette_voci. No-op if voci is empty."""
     with get_connection(db_path) as conn:
         conn.executemany(
             """
@@ -118,6 +119,7 @@ def insert_voci(bolletta_id: int, voci: list[dict], db_path: Path = DB_PATH) -> 
 
 
 def get_voci_by_bolletta(bolletta_id: int, db_path: Path = DB_PATH) -> list[dict]:
+    """Return all voci for a bill ordered by insertion id, excluding the id column."""
     with get_connection(db_path) as conn:
         rows = conn.execute(
             "SELECT nome, importo, periodo_inizio, periodo_fine "

@@ -141,6 +141,12 @@ def test_bollette_voci_cascade_delete(tmp_db):
     assert count == 0
 
 
+def test_insert_voci_empty_list(tmp_db):
+    bill_id = db.insert_bill(SAMPLE_BILL_TELEFONO, tmp_db)
+    db.insert_voci(bill_id, [], tmp_db)  # must not raise
+    assert db.get_voci_by_bolletta(bill_id, tmp_db) == []
+
+
 def test_insert_voci_stores_all_rows(tmp_db):
     bill_id = db.insert_bill(SAMPLE_BILL_TELEFONO, tmp_db)
     db.insert_voci(bill_id, SAMPLE_VOCI, tmp_db)
