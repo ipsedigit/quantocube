@@ -37,8 +37,6 @@ e restituisci un JSON con ESATTAMENTE questi nomi di campo:
   "periodo_inizio": "2024-01-01",
   "periodo_fine": "2024-03-31",
   "importo_totale": 123.45,
-  "consumo": 55.0,
-  "unita_consumo": "Smc",
   "tariffa": "Prezzo fisso",
   "scadenza_pagamento": "2024-04-15"
 }}
@@ -48,8 +46,6 @@ Regole:
 - periodo_inizio e periodo_fine: metti "0000-00-00" come segnaposto, saranno
   calcolate automaticamente dal sistema — non devi calcolarle tu.
 - importo_totale: il "Totale da pagare" in euro, numero decimale (es. 194.00)
-- consumo: consumo numerico fatturato, oppure null se non presente
-- unita_consumo: unità di misura (es. "kWh", "Smc", "m³"), oppure null
 - tariffa: tipo tariffa oppure null
 - scadenza_pagamento: formato YYYY-MM-DD oppure null
 
@@ -368,12 +364,10 @@ def ingest_pdf(
     if importo is not None:
         data["importo_totale"] = importo
 
-    # Override null consumo with deterministic regex extraction.
-    if data.get("consumo") is None and data.get("tipo"):
-        val, unit = _extract_consumption(markdown, data["tipo"])
-        if val is not None:
-            data["consumo"] = val
-            data["unita_consumo"] = unit
+    # Consumption is never trusted to the LLM — regex only.
+    val, unit = _extract_consumption(markdown, data.get("tipo", ""))
+    data["consumo"] = val
+    data["unita_consumo"] = unit
 
     required = {"tipo", "fornitore", "periodo_inizio", "periodo_fine", "importo_totale"}
     null_required = {k for k in required if not data.get(k) or data[k] == "0000-00-00"}
