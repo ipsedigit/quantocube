@@ -19,3 +19,4 @@
 /.idea/*
 /tests/__pycache__/*
 /DOWNLOAD_BILLS.md
+/.worktrees/
