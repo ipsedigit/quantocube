@@ -20,6 +20,7 @@ DB_PATH = Path(__file__).parent / "data" / "bills.db"
 def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    # Must be set before any transaction opens; takes effect for the lifetime of this connection.
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -52,6 +53,10 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 periodo_inizio DATE,
                 periodo_fine   DATE
             )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bollette_voci_bolletta_id
+                ON bollette_voci (bolletta_id)
         """)
 
 

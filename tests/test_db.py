@@ -1,4 +1,5 @@
 import pytest
+import sqlite3
 from pathlib import Path
 import db
 
@@ -93,6 +94,28 @@ def test_init_db_creates_bollette_voci_table(tmp_db):
 
 def test_init_db_bollette_voci_idempotent(tmp_db):
     db.init_db(tmp_db)  # second call must not raise
+    with db.get_connection(tmp_db) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM bollette_voci").fetchone()[0]
+    assert count == 0
+
+
+def test_bollette_voci_fk_rejects_orphan(tmp_db):
+    with db.get_connection(tmp_db) as conn:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO bollette_voci (bolletta_id, nome, importo) VALUES (?, ?, ?)",
+                [999, "Quota fissa", 5.00],
+            )
+
+
+def test_bollette_voci_cascade_delete(tmp_db):
+    bill_id = db.insert_bill(SAMPLE_BILL, tmp_db)
+    with db.get_connection(tmp_db) as conn:
+        conn.execute(
+            "INSERT INTO bollette_voci (bolletta_id, nome, importo) VALUES (?, ?, ?)",
+            [bill_id, "Quota fissa", 5.00],
+        )
+    db.delete_bill(bill_id, tmp_db)
     with db.get_connection(tmp_db) as conn:
         count = conn.execute("SELECT COUNT(*) FROM bollette_voci").fetchone()[0]
     assert count == 0
