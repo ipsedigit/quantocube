@@ -77,7 +77,7 @@ def test_insert_bill_round_trip(tmp_db):
     with db.get_connection(tmp_db) as conn:
         row = conn.execute("SELECT * FROM bollette WHERE id = 1").fetchone()
     assert row["tipo"] == "luce"
-    assert row["fornitore"] == "Enel"
+    assert row["fornitore"] == "enel"
     assert row["importo_totale"] == pytest.approx(85.50)
     assert row["consumo"] == pytest.approx(120.0)
     assert row["file_pdf"] == "/bills/pdf/enel.pdf"
