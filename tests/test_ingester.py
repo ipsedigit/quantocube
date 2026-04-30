@@ -153,3 +153,29 @@ def test_extract_period_dates_tim_abbreviated_december():
     md = "Piano base 01 dic 25 - 31 dic 25 22% 29,90"
     result = ingester._extract_period_dates(md)
     assert result == {"periodo_inizio": "2025-12-01", "periodo_fine": "2025-12-31"}
+
+
+def test_extract_importo_telefono_with_euro_sign():
+    md = "Totale da pagare € 43,89"
+    assert ingester._extract_importo_telefono(md) == pytest.approx(43.89)
+
+
+def test_extract_importo_telefono_br_bold_format():
+    # actual pymupdf4llm output for TIM bills
+    md = "||Totale da pagare<br>**€ 43,89**|"
+    assert ingester._extract_importo_telefono(md) == pytest.approx(43.89)
+
+
+def test_extract_importo_telefono_without_euro_sign():
+    md = "Totale da pagare 43,89"
+    assert ingester._extract_importo_telefono(md) == pytest.approx(43.89)
+
+
+def test_extract_importo_telefono_three_digit_amount():
+    md = "Totale da pagare € 123,45"
+    assert ingester._extract_importo_telefono(md) == pytest.approx(123.45)
+
+
+def test_extract_importo_telefono_not_found():
+    md = "Nessun totale qui"
+    assert ingester._extract_importo_telefono(md) is None

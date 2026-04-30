@@ -187,6 +187,22 @@ def _extract_importo_da_pdf(pdf_path: Path) -> float | None:
     return None
 
 
+def _extract_importo_telefono(markdown: str) -> float | None:
+    """Extract importo_totale from TIM bills via 'Totale da pagare' text line.
+
+    Handles plain text ("Totale da pagare € 43,89") and pymupdf4llm table-cell
+    format ("Totale da pagare<br>**€ 43,89**").
+    """
+    m = re.search(
+        r"Totale da pagare\s*(?:<br>)?\s*\*{0,2}\s*€?\s*(\d{1,3}(?:\.\d{3})*,\d{2})",
+        markdown,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+    return float(m.group(1).replace(".", "").replace(",", "."))
+
+
 def pdf_to_markdown(pdf_path: Path) -> str:
     return pymupdf4llm.to_markdown(str(pdf_path))
 
