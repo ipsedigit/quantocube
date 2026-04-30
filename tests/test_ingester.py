@@ -215,3 +215,63 @@ def test_extract_voci_telefono_last_row():
 
 def test_extract_voci_telefono_section_not_found():
     assert ingester._extract_voci_telefono("# Bolletta luce") == []
+
+
+EXTRACTED_TELEFONO = {
+    "tipo": "telefono",
+    "fornitore": "TIM",
+    "periodo_inizio": "0000-00-00",
+    "periodo_fine": "0000-00-00",
+    "importo_totale": 43.89,
+    "consumo": None,
+    "unita_consumo": None,
+    "tariffa": None,
+    "scadenza_pagamento": "2026-05-08",
+}
+
+_TIM_FULL_MD = (
+    "## **TIM - S.p.A.**\n"
+    "Fattura Aprile 2026\n"
+    "TIM CONNECT Premium XDSL\n"
+    "## **Dettaglio dei costi** \n\n"
+    "||Offerte e servizi<br>IVA incl.<br>Rif. IVA<br>Periodo|\n"
+    "|---|---|\n"
+    "||TIM CONNECT Premium XDSL<br>01 mar 26 - 31 mar 26<br>22%<br>33,90<br>"
+    "Massima Velocità<br>01 mar 26 - 31 mar 26<br>22%<br>5,00<br>"
+    "TIMVISION Light<br>01 mar 26 - 31 mar 26<br>22%<br>4,99|\n"
+    "|||\n"
+    "||Totale da pagare<br>**€ 43,89**|\n"
+)
+
+
+def test_ingest_pdf_inserts_voci_for_telefono(setup):
+    db_path, md_dir, pdf_path = setup
+    mock_resp = MagicMock()
+    mock_resp.message.content = json.dumps(EXTRACTED_TELEFONO)
+
+    with patch("ingester.pymupdf4llm.to_markdown", return_value=_TIM_FULL_MD):
+        with patch("ingester.ollama.chat", return_value=mock_resp):
+            ingester.ingest_pdf(pdf_path, db_path=db_path, md_dir=md_dir)
+
+    with db.get_connection(db_path) as conn:
+        bill = conn.execute("SELECT id FROM bollette").fetchone()
+    voci = db.get_voci_by_bolletta(bill["id"], db_path)
+    assert len(voci) == 3
+    assert voci[0]["nome"] == "TIM CONNECT Premium XDSL"
+
+
+def test_ingest_pdf_voci_failure_does_not_abort(setup):
+    """If voci extraction finds nothing, the bill is still saved."""
+    db_path, md_dir, pdf_path = setup
+    mock_resp = MagicMock()
+    mock_resp.message.content = json.dumps(EXTRACTED_TELEFONO)
+    no_voci_md = "TIM S.p.A.\n01 mar 26 - 31 mar 26\nTotale da pagare € 43,89\n"
+
+    with patch("ingester.pymupdf4llm.to_markdown", return_value=no_voci_md):
+        with patch("ingester.ollama.chat", return_value=mock_resp):
+            result = ingester.ingest_pdf(pdf_path, db_path=db_path, md_dir=md_dir)
+
+    assert result["tipo"] == "telefono"
+    with db.get_connection(db_path) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM bollette").fetchone()[0]
+    assert count == 1
