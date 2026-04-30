@@ -20,6 +20,7 @@ DB_PATH = Path(__file__).parent / "data" / "bills.db"
 def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -40,6 +41,16 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 scadenza_pagamento DATE,
                 file_pdf TEXT,
                 file_md TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bollette_voci (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                bolletta_id    INTEGER NOT NULL REFERENCES bollette(id) ON DELETE CASCADE,
+                nome           TEXT NOT NULL,
+                importo        REAL NOT NULL,
+                periodo_inizio DATE,
+                periodo_fine   DATE
             )
         """)
 

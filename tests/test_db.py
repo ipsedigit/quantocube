@@ -81,3 +81,18 @@ def test_insert_bill_round_trip(tmp_db):
     assert row["importo_totale"] == pytest.approx(85.50)
     assert row["consumo"] == pytest.approx(120.0)
     assert row["file_pdf"] == "/bills/pdf/enel.pdf"
+
+
+def test_init_db_creates_bollette_voci_table(tmp_db):
+    with db.get_connection(tmp_db) as conn:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='bollette_voci'"
+        )
+        assert cursor.fetchone() is not None
+
+
+def test_init_db_bollette_voci_idempotent(tmp_db):
+    db.init_db(tmp_db)  # second call must not raise
+    with db.get_connection(tmp_db) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM bollette_voci").fetchone()[0]
+    assert count == 0
