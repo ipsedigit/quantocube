@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 import db
@@ -69,6 +70,20 @@ def build_yearly_chart(rows: list[dict]):
     )
 
 
+def build_voci_chart(voci: list[dict]):
+    """Horizontal bar chart of service costs for a phone bill."""
+    if not voci:
+        return None
+    nomi = [v["nome"] for v in voci]
+    importi = [v["importo"] for v in voci]
+    fig = go.Figure(go.Bar(x=importi, y=nomi, orientation="h"))
+    fig.update_layout(
+        xaxis_title="Importo (€)",
+        yaxis_title="Servizio",
+    )
+    return fig
+
+
 def open_pdf(path: str) -> None:
     if not path or not Path(path).exists():
         return
@@ -104,12 +119,21 @@ def render_dashboard(db_path: Path = DB_PATH) -> None:
                     st.info("Dati spesa non disponibili")
 
             with col2:
-                st.caption("Consumo nel tempo")
-                fig = build_consumption_chart(bills)
-                if fig is not None:
-                    st.plotly_chart(fig, use_container_width=True)
+                if tipo == "telefono":
+                    st.caption("Composizione ultima bolletta")
+                    latest_voci = db.get_voci_by_bolletta(bills[0]["id"], db_path) if bills else []
+                    fig = build_voci_chart(latest_voci)
+                    if fig is not None:
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("Dettaglio servizi non disponibile")
                 else:
-                    st.info("Dati consumo non disponibili")
+                    st.caption("Consumo nel tempo")
+                    fig = build_consumption_chart(bills)
+                    if fig is not None:
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("Dati consumo non disponibili")
 
             with col3:
                 st.caption("Confronto annuale")
@@ -144,3 +168,11 @@ def render_dashboard(db_path: Path = DB_PATH) -> None:
                     disabled=not pdf_available,
                 ):
                     open_pdf(pdf_path)
+
+                if tipo == "telefono":
+                    voci = db.get_voci_by_bolletta(bill["id"], db_path)
+                    if voci:
+                        with st.expander("Dettaglio servizi"):
+                            voci_df = pd.DataFrame(voci)[["nome", "importo"]]
+                            voci_df.columns = ["Servizio", "Importo (€)"]
+                            st.dataframe(voci_df, hide_index=True, use_container_width=True)

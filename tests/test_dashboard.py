@@ -107,3 +107,28 @@ def test_build_spending_chart_empty_rows():
 
 def test_build_yearly_chart_empty_rows():
     assert dashboard.build_yearly_chart([]) is None
+
+
+VOCI = [
+    {"nome": "TIM CONNECT Premium XDSL", "importo": 33.90, "periodo_inizio": "2026-03-01", "periodo_fine": "2026-03-31"},
+    {"nome": "Massima Velocità", "importo": 5.00, "periodo_inizio": "2026-03-01", "periodo_fine": "2026-03-31"},
+    {"nome": "TIMVISION Light", "importo": 4.99, "periodo_inizio": "2026-03-01", "periodo_fine": "2026-03-31"},
+]
+
+
+def test_build_voci_chart_returns_figure():
+    fig = dashboard.build_voci_chart(VOCI)
+    assert fig is not None
+    assert len(fig.data) == 1
+    assert len(fig.data[0].x) == 3  # three importo values on x-axis
+
+
+def test_build_voci_chart_empty_returns_none():
+    assert dashboard.build_voci_chart([]) is None
+
+
+def test_build_voci_chart_correct_values():
+    fig = dashboard.build_voci_chart(VOCI)
+    # Horizontal bar: x = importo values, y = service names
+    assert pytest.approx(33.90) in fig.data[0].x
+    assert "TIM CONNECT Premium XDSL" in fig.data[0].y
