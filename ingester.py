@@ -434,7 +434,7 @@ def ingest_pdf(
     # Override importo_totale with coordinate-based extraction (more reliable than LLM
     # for bills where the total lives in a graphical box not captured by pymupdf4llm).
     importo = _extract_importo_da_pdf(pdf_path)
-    if importo is None:
+    if importo is None and data.get("tipo") == "telefono":
         importo = _extract_importo_telefono(markdown)
     if importo is not None:
         data["importo_totale"] = importo
