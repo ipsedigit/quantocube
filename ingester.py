@@ -128,6 +128,18 @@ def _extract_period_dates(markdown: str) -> dict | None:
         inizio = (first_start + timedelta(days=1)).isoformat()
         return {"periodo_inizio": inizio, "periodo_fine": last_end}
 
+    # Method 3: TIM abbreviated-month format "dd mmm yy - dd mmm yy"
+    _abbr = "|".join(_MESI_IT_ABBR.keys())
+    m = re.search(
+        rf"(\d{{2}})\s+({_abbr})\s+(\d{{2}})\s*[-–]\s*(\d{{2}})\s+({_abbr})\s+(\d{{2}})",
+        markdown,
+        re.IGNORECASE,
+    )
+    if m:
+        inizio = f"20{m.group(3)}-{_MESI_IT_ABBR[m.group(2).lower()]}-{m.group(1)}"
+        fine = f"20{m.group(6)}-{_MESI_IT_ABBR[m.group(5).lower()]}-{m.group(4)}"
+        return {"periodo_inizio": inizio, "periodo_fine": fine}
+
     return None
 
 

@@ -128,3 +128,28 @@ def test_extract_tipo_telefono_from_fibra():
 def test_extract_tipo_telefono_from_telecom():
     md = "TELECOM ITALIA S.p.A."
     assert ingester._extract_tipo(md) == "telefono"
+
+
+_TIM_MD_PERIODO = (
+    "Fattura Aprile 2026\n"
+    "TIM CONNECT Premium XDSL 01 mar 26 - 31 mar 26 22% 33,90\n"
+    "Massima Velocità 01 mar 26 - 31 mar 26 22% 5,00\n"
+    "Totale da pagare € 43,89\n"
+)
+
+
+def test_extract_period_dates_tim_abbreviated_months():
+    result = ingester._extract_period_dates(_TIM_MD_PERIODO)
+    assert result == {"periodo_inizio": "2026-03-01", "periodo_fine": "2026-03-31"}
+
+
+def test_extract_period_dates_tim_abbreviated_january():
+    md = "Piano base 01 gen 26 - 31 gen 26 22% 29,90"
+    result = ingester._extract_period_dates(md)
+    assert result == {"periodo_inizio": "2026-01-01", "periodo_fine": "2026-01-31"}
+
+
+def test_extract_period_dates_tim_abbreviated_december():
+    md = "Piano base 01 dic 25 - 31 dic 25 22% 29,90"
+    result = ingester._extract_period_dates(md)
+    assert result == {"periodo_inizio": "2025-12-01", "periodo_fine": "2025-12-31"}
