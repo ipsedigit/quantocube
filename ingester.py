@@ -59,6 +59,12 @@ _MESI_IT = {
     "settembre": "09", "ottobre": "10", "novembre": "11", "dicembre": "12",
 }
 
+_MESI_IT_ABBR = {
+    "gen": "01", "feb": "02", "mar": "03", "apr": "04",
+    "mag": "05", "giu": "06", "lug": "07", "ago": "08",
+    "set": "09", "ott": "10", "nov": "11", "dic": "12",
+}
+
 
 def _it_date(day: str, month: str, year: str) -> str | None:
     """Convert Italian word date components to YYYY-MM-DD, or None if unknown month."""
@@ -81,6 +87,8 @@ def _extract_tipo(markdown: str) -> str | None:
         return "gas"
     if any(k in head for k in ("acqua", "idric")):
         return "acqua"
+    if any(k in head for k in ("telefon", "tim ", "telecom", "xdsl", "fibra", "internet")):
+        return "telefono"
     return None
 
 

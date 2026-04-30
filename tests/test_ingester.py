@@ -103,3 +103,28 @@ def test_extract_bill_data_raises_on_missing_fields(setup):
     with pytest.raises(ValueError, match="Campi mancanti"):
         with patch("ingester.ollama.chat", return_value=mock_resp):
             ingester.extract_bill_data("# Bolletta")
+
+
+def test_extract_tipo_telefono_from_tim_brand():
+    md = "## TIM S.p.A.\nFattura Aprile 2026\nTIM CONNECT Premium XDSL"
+    assert ingester._extract_tipo(md) == "telefono"
+
+
+def test_extract_tipo_telefono_from_keyword():
+    md = "Servizi di telefonia e internet"
+    assert ingester._extract_tipo(md) == "telefono"
+
+
+def test_extract_tipo_telefono_from_xdsl():
+    md = "Abbonamento XDSL residenziale"
+    assert ingester._extract_tipo(md) == "telefono"
+
+
+def test_extract_tipo_telefono_from_fibra():
+    md = "Offerta fibra ottica"
+    assert ingester._extract_tipo(md) == "telefono"
+
+
+def test_extract_tipo_telefono_from_telecom():
+    md = "TELECOM ITALIA S.p.A."
+    assert ingester._extract_tipo(md) == "telefono"
