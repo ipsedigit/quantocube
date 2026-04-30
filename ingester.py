@@ -203,6 +203,43 @@ def _extract_importo_telefono(markdown: str) -> float | None:
     return float(m.group(1).replace(".", "").replace(",", "."))
 
 
+def _extract_voci_telefono(markdown: str) -> list[dict]:
+    """Parse the 'Dettaglio dei costi' table and return one dict per service row.
+
+    pymupdf4llm renders TIM bills with all services in one <br>-delimited cell:
+    nome<br>dd mmm yy - dd mmm yy<br>N%<br>amount<br>[next service...]
+    """
+    section = re.search(
+        r"(?:Dettaglio dei costi|Offerte e servizi)(.+?)Totale da pagare",
+        markdown,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not section:
+        return []
+
+    _abbr = "|".join(_MESI_IT_ABBR.keys())
+    pattern = re.compile(
+        rf"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 ]+?)"
+        rf"<br>"
+        rf"(\d{{2}})\s+({_abbr})\s+(\d{{2}})\s*-\s*(\d{{2}})\s+({_abbr})\s+(\d{{2}})"
+        rf"<br>"
+        rf"\d+%"
+        rf"<br>"
+        rf"([\d]+,[\d]{{2}})",
+        re.IGNORECASE,
+    )
+
+    result = []
+    for m in pattern.finditer(section.group(1)):
+        nome = m.group(1).strip()
+        inizio = f"20{m.group(4)}-{_MESI_IT_ABBR[m.group(3).lower()]}-{m.group(2)}"
+        fine = f"20{m.group(7)}-{_MESI_IT_ABBR[m.group(6).lower()]}-{m.group(5)}"
+        importo = float(m.group(8).replace(",", "."))
+        result.append({"nome": nome, "importo": importo, "periodo_inizio": inizio, "periodo_fine": fine})
+
+    return result
+
+
 def pdf_to_markdown(pdf_path: Path) -> str:
     return pymupdf4llm.to_markdown(str(pdf_path))
 

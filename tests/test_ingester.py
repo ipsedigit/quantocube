@@ -179,3 +179,39 @@ def test_extract_importo_telefono_three_digit_amount():
 def test_extract_importo_telefono_not_found():
     md = "Nessun totale qui"
     assert ingester._extract_importo_telefono(md) is None
+
+
+# Fixture matches the ACTUAL pymupdf4llm output: all services in one <br>-delimited cell
+_TIM_MD_VOCI = (
+    "## **Dettaglio dei costi** \n\n"
+    "||Offerte e servizi<br>IVA incl.<br>Rif. IVA<br>Periodo|\n"
+    "|---|---|\n"
+    "||TIM CONNECT Premium XDSL<br>01 mar 26 - 31 mar 26<br>22%<br>33,90<br>"
+    "Massima Velocità<br>01 mar 26 - 31 mar 26<br>22%<br>5,00<br>"
+    "TIMVISION Light<br>01 mar 26 - 31 mar 26<br>22%<br>4,99|\n"
+    "|||\n"
+    "||Totale da pagare<br>**€ 43,89**|\n"
+)
+
+
+def test_extract_voci_telefono_count():
+    voci = ingester._extract_voci_telefono(_TIM_MD_VOCI)
+    assert len(voci) == 3
+
+
+def test_extract_voci_telefono_first_row():
+    voci = ingester._extract_voci_telefono(_TIM_MD_VOCI)
+    assert voci[0]["nome"] == "TIM CONNECT Premium XDSL"
+    assert voci[0]["importo"] == pytest.approx(33.90)
+    assert voci[0]["periodo_inizio"] == "2026-03-01"
+    assert voci[0]["periodo_fine"] == "2026-03-31"
+
+
+def test_extract_voci_telefono_last_row():
+    voci = ingester._extract_voci_telefono(_TIM_MD_VOCI)
+    assert voci[2]["nome"] == "TIMVISION Light"
+    assert voci[2]["importo"] == pytest.approx(4.99)
+
+
+def test_extract_voci_telefono_section_not_found():
+    assert ingester._extract_voci_telefono("# Bolletta luce") == []
