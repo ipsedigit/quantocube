@@ -43,6 +43,7 @@ e restituisci un JSON con ESATTAMENTE questi nomi di campo:
 
 Regole:
 - tipo: "luce", "gas", "acqua" o "telefono" (minuscolo)
+- fornitore: nome dell'azienda fornitrice (es. "A2A Energia", "Enel", "ENI Gas e Luce") — cercalo nell'intestazione o nel piè di pagina della bolletta
 - periodo_inizio e periodo_fine: metti "0000-00-00" come segnaposto, saranno
   calcolate automaticamente dal sistema — non devi calcolarle tu.
 - importo_totale: il "Totale da pagare" in euro, numero decimale (es. 194.00)
@@ -89,6 +90,33 @@ def _extract_tipo(markdown: str) -> str | None:
         return "acqua"
     if any(k in head for k in ("telefon", "tim ", "telecom", "xdsl", "fibra", "internet")):
         return "telefono"
+    return None
+
+
+_FORNITORE_KEYWORDS: list[tuple[str, str]] = [
+    ("a2a energia", "A2A Energia"),
+    ("a2a", "A2A"),
+    ("enel", "Enel"),
+    ("eni gas", "ENI Gas e Luce"),
+    ("eni plenitude", "ENI Plenitude"),
+    ("edison", "Edison"),
+    ("tim", "TIM"),
+    ("vodafone", "Vodafone"),
+    ("wind", "Wind"),
+    ("iliad", "Iliad"),
+    ("fastweb", "Fastweb"),
+    ("acea", "ACEA"),
+    ("hera", "Hera"),
+    ("iren", "Iren"),
+]
+
+
+def _extract_fornitore(markdown: str) -> str | None:
+    """Detect provider name from keywords in the markdown."""
+    head = markdown[:3000].lower()
+    for keyword, label in _FORNITORE_KEYWORDS:
+        if keyword in head:
+            return label
     return None
 
 
@@ -256,6 +284,10 @@ def extract_bill_data(markdown: str) -> dict:
     missing = required - data.keys()
     if missing:
         raise ValueError(f"Campi mancanti nell'estrazione LLM: {missing}")
+    if not data.get("fornitore"):
+        data["fornitore"] = _extract_fornitore(markdown)
+    if not data.get("tipo"):
+        data["tipo"] = _extract_tipo(markdown)
     return data
 
 
@@ -430,6 +462,10 @@ def ingest_pdf(
     # Override tipo if LLM returned null (keyword detection is more reliable).
     if not data.get("tipo"):
         data["tipo"] = _extract_tipo(markdown)
+
+    # Override fornitore if LLM returned null.
+    if not data.get("fornitore"):
+        data["fornitore"] = _extract_fornitore(markdown)
 
     # Override importo_totale with coordinate-based extraction (more reliable than LLM
     # for bills where the total lives in a graphical box not captured by pymupdf4llm).
